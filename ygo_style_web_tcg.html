@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web TCG Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Slate 900 */
+            color: #f8fafc;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+        
+        .card {
+            width: 80px;
+            height: 116px;
+            background: linear-gradient(145deg, #334155, #1e293b);
+            border: 2px solid #475569;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 4px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            user-select: none;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            position: rel'ative;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.7);
+            border-color: #94a3b8;
+        }
+
+        .card.card-back {
+            background: linear-gradient(145deg, #7f1d1d, #450a0a);
+            border: 2px solid #991b1b;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .card.card-back::after {
+            content: "TCG";
+            font-weight: bold;
+            color: rgba(255,255,255,0.2);
+            font-size: 20px;
+            transform: rotate(-45deg);
+        }
+
+        .card-name {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-align: center;
+            background-color: rgba(0,0,0,0.5);
+            border-radius: 4px;
+            padding: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.7rem;
+            font-weight: bold;
+            background-color: rgba(0,0,0,0.5);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .atk-text { color: #f87171; }
+        
+        .zone {
+            width: 84px;
+            height: 120px;
+            border: 2px dashed #334155;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(15, 23, 42, 0.5);
+        }
+
+        .zone.highlight {
+            border-color: #facc15;
+            background-color: rgba(250, 204, 21, 0.1);
+            animation: pulse 1.5s infinite;
+        }
+
+        .card.selected {
+            border-color: #facc15;
+            box-shadow: 0 0 15px #facc15;
+            transform: scale(1.05);
+        }
+
+        .card.exhausted {
+            filter: grayscale(80%) opacity(0.7);
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(250, 204, 21, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }
+        }
+
+        /* Opponent side inversion for specific elements */
+        #opponent-field .card {
+            transform: rotate(180deg);
+        }
+        #opponent-field .card:hover {
+            transform: rotate(180deg) translateY(5px);
+        }
+
+        /* Modals and Toasts */
+        .toast-enter { transform: translateY(100%); opacity: 0; }
+        .toast-enter-active { transform: translateY(0); opacity: 1; transition: all 0.3s ease-out; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Screen: Auth Loading -->
+    <div id="screen-loading" class="flex-1 flex items-center justify-center">
+        <div class="text-xl animate-pulse text-slate-400">Connecting to Server...</div>
+    </div>
+
+    <!-- Screen: Lobby -->
+    <div id="screen-lobby" class="hidden flex-1 flex items-center justify-center">
+        <div class="bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700 w-full max-w-md text-center">
+            <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Nexus TCG</h1>
+            <p class="text-slate-400 mb-8 text-sm">Join the duel arena.</p>
+            
+            <button id="btn-create-room" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg mb-4 transition-colors">
+                Create New Duel Room
+            </button>
+            
+            <div class="flex items-center my-4">
+                <div class="flex-1 border-t border-slate-600"></div>
+                <span class="px-3 text-slate-500 text-sm">OR</span>
+                <div class="flex-1 border-t border-slate-600"></div>
+            </div>
+            
+            <div class="flex gap-2">
+                <input type="text" id="input-room-id" placeholder="Enter 4-digit Room ID" maxlength="4" class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-center text-xl uppercase font-mono focus:outline-none focus:border-blue-500">
+                <button id="btn-join-room" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                    Join
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen: Waiting for Opponent -->
+    <div id="screen-waiting" class="hidden flex-1 flex flex-col items-center justify-center">
+        <div class="bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700 text-center">
+            <h2 class="text-2xl font-bold mb-4">Waiting for Opponent...</h2>
+            <p class="text-slate-400 mb-6">Share this Room ID with your friend:</p>
+            <div id="display-room-id" class="text-5xl font-mono font-bold tracking-widest text-blue-400 mb-6 bg-slate-900 py-4 px-8 rounded-lg border border-slate-700 inline-block">
+                ----
+            </div>
+            <p class="text-sm text-slate-500 animate-pulse">Waiting for them to join...</p>
+        </div>
+    </div>
+
+    <!-- Screen: Game Board -->
+    <div id="screen-game" class="hidden flex-1 flex flex-col justify-between">
+        
+        <!-- Opponent Area (Top) -->
+        <div class="bg-slate-800/50 p-2 border-b border-slate-700/50 flex flex-col h-[40vh]">
+            <!-- Opponent Profile & LP -->
+            <div class="flex justify-between items-center px-4 py-2 bg-slate-900/50 rounded-lg mb-2">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-red-900 rounded-full flex items-center justify-center border-2 border-red-500 font-bold">P2</div>
+                    <span id="opp-name" class="font-bold text-slate-300">Opponent</span>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs text-slate-400">Life Points</div>
+                    <div id="opp-lp" class="text-3xl font-mono font-bold text-white tracking-wider">8000</div>
+                </div>
+            </div>
+            
+            <!-- Opponent Hand -->
+            <div id="opp-hand" class="flex justify-center gap-[-20px] mb-4 h-[60px] overflow-visible scale-75 transform-origin-top">
+                <!-- Card backs injected here -->
+            </div>
+
+            <!-- Opponent Field (Monster Zones) -->
+            <div id="opp-field" class="flex justify-center gap-2 mt-auto pb-4">
+                <div class="zone" data-index="0"></div>
+                <div class="zone" data-index="1"></div>
+                <div class="zone" data-index="2"></div>
+                <div class="zone" data-index="3"></div>
+                <div class="zone" data-index="4"></div>
+            </div>
+        </div>
+
+        <!-- Center Divider / UI -->
+        <div class="bg-slate-900 h-12 flex justify-between items-center px-8 border-y border-slate-700 relative z-10 shadow-lg">
+            <div id="turn-indicator" class="font-bold uppercase tracking-widest text-sm text-blue-400">
+                Your Turn
+            </div>
+            
+            <div class="flex gap-2 bg-slate-800 p-1 rounded-lg">
+                <div id="phase-main" class="px-4 py-1 text-xs font-bold rounded bg-blue-600 text-white shadow">MAIN PHASE</div>
+                <div id="phase-battle" class="px-4 py-1 text-xs font-bold rounded text-slate-400">BATTLE PHASE</div>
+            </div>
+
+            <button id="btn-next-phase" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded font-bold text-sm transition-colors disabled:opacity-50">
+                Next Phase
+            </button>
+        </div>
+
+        <!-- Player Area (Bottom) -->
+        <div class="bg-slate-800/80 p-2 flex flex-col h-[45vh]">
+            
+            <!-- Player Field (Monster Zones) -->
+            <div id="player-field" class="flex justify-center gap-2 mt-4 mb-auto">
+                <div class="zone" data-index="0"></div>
+                <div class="zone" data-index="1"></div>
+                <div class="zone" data-index="2"></div>
+                <div class="zone" data-index="3"></div>
+                <div class="zone" data-index="4"></div>
+            </div>
+
+            <!-- Player Hand -->
+            <div class="mt-4 mb-2">
+                <div class="text-xs text-center text-slate-400 mb-1">Your Hand</div>
+                <div id="player-hand" class="flex justify-center gap-2 overflow-x-auto pb-4 px-4 min-h-[130px]">
+                    <!-- Cards injected here -->
+                </div>
+            </div>
+
+            <!-- Player Profile & LP -->
+            <div class="flex justify-between items-center px-4 py-2 bg-slate-900 rounded-lg mt-auto shadow-xl border-t border-slate-700">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 bg-blue-900 rounded-full flex items-center justify-center border-2 border-blue-500 font-bold text-lg">P1</div>
+                    <div>
+                        <span id="player-name" class="font-bold text-white block">You</span>
+                        <span id="player-deck-count" class="text-xs text-slate-400">Deck: 15</span>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs text-blue-300 font-bold uppercase tracking-wider">Life Points</div>
+                    <div id="player-lp" class="text-4xl font-mono font-bold text-white tracking-wider">8000</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen: Game Over -->
+    <div id="screen-gameover" class="hidden absolute inset-0 bg-black/90 z-50 flex items-center justify-center flex-col">
+        <h1 id="gameover-title" class="text-6xl font-bold mb-4">YOU WIN!</h1>
+        <p id="gameover-subtitle" class="text-xl text-slate-400 mb-8">The opponent's Life Points reached 0.</p>
+        <button onclick="window.location.reload()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg transition-colors">
+            Return to Lobby
+        </button>
+    </div>
+
+    <!-- Application Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // FIREBASE SETUP & STATE
+        // ==========================================
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-tcg-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            // Provide a mock or fallback if not in environment, though the prompt implies it will be provided.
+        };
+        
+        let app, db, auth, userId;
+        let unsubscribeRoom = null;
+        
+        // Game State Variables
+        let currentRoomId = null;
+        let myRole = null; // 'player1' or 'player2'
+        let oppRole = null;
+        let gameState = null;
+        
+        // Local Interaction State
+        let selectedAttackerIndex = null; // index of monster in field
+
+        // DOM Elements
+        const screens = {
+            loading: document.getElementById('screen-loading'),
+            lobby: document.getElementById('screen-lobby'),
+            waiting: document.getElementById('screen-waiting'),
+            game: document.getElementById('screen-game'),
+            gameover: document.getElementById('screen-gameover')
+        };
+
+        // ==========================================
+        // CARD DATA GENERATOR
+        // ==========================================
+        const cardTemplates = [
+            { name: "Mystic Dragon", atk: 2500 },
+            { name: "Dark Knight", atk: 2000 },
+            { name: "Goblin Brute", atk: 1200 },
+            { name: "Fire Mage", atk: 1500 },
+            { name: "Stone Golem", atk: 1800 },
+            { name: "Shadow Assassin", atk: 1600 },
+            { name: "Holy Crusader", atk: 2200 },
+            { name: "Wind Spirit", atk: 1400 },
+            { name: "Frost Giant", atk: 2400 },
+            { name: "Thunder Beast", atk: 1900 },
+        ];
+
+        function generateDeck() {
+            let deck = [];
+            for(let i=0; i<20; i++) {
+                const template = cardTemplates[Math.floor(Math.random() * cardTemplates.length)];
+                deck.push({
+                    id: 'card_' + Math.random().toString(36).substr(2, 9),
+                    name: template.name,
+                    atk: template.atk,
+                    hasAttacked: false // State for battle phase
+                });
+            }
+            return deck;
+        }
+
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        async function init() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    showToast("Error: Firebase Config missing.", true);
+                    return;
+                }
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Authentication
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                userId = auth.currentUser.uid;
+                
+                showScreen('lobby');
+                setupEventListeners();
+            } catch (error) {
+                console.error("Init error:", error);
+                showToast("Failed to initialize game.", true);
+            }
+        }
+
+        // ==========================================
+        // UI HELPERS
+        // ==========================================
+        function showScreen(screenName) {
+            Object.values(screens).forEach(s => s.classList.add('hidden'));
+            if(screens[screenName]) screens[screenName].classList.remove('hidden', 'flex');
+            
+            // Tailwind flex resets
+            if(['loading', 'lobby', 'waiting', 'game'].includes(screenName)) {
+                screens[screenName].classList.add('flex');
+            }
+        }
+
+        function showToast(message, isError = false) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-2 rounded shadow-lg text-sm font-bold text-white transition-all transform translate-y-full opacity-0 ${isError ? 'bg-red-600' : 'bg-slate-700 border border-slate-600'}`;
+            toast.textContent = message;
+            
+            container.appendChild(toast);
+            
+            // Animate in
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-full', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function generateRoomId() {
+            return Math.random().toString(36).substring(2, 6).toUpperCase();
+        }
+
+        // ==========================================
+        // FIREBASE SYNC LOGIC
+        // ==========================================
+        function getRoomRef(roomId) {
+            return doc(db, 'artifacts', appId, 'public', 'data', 'tcg_rooms', roomId);
+        }
+
+        async function createRoom() {
+            if (!userId) return;
+            const roomId = generateRoomId();
+            const roomRef = getRoomRef(roomId);
+
+            const initialDeck = generateDeck();
+            const initialHand = initialDeck.splice(0, 5); // Draw 5 cards
+
+            const initialGameState = {
+                status: 'waiting',
+                turn: 'player1',
+                phase: 'main',
+                winner: null,
+                player1: {
+                    uid: userId,
+                    lp: 8000,
+                    deck: initialDeck,
+                    hand: initialHand,
+                    field: [null, null, null, null, null]
+                },
+                player2: null // Will be filled when someone joins
+            };
+
+            try {
+                await setDoc(roomRef, initialGameState);
+                currentRoomId = roomId;
+                myRole = 'player1';
+                oppRole = 'player2';
+                
+                document.getElementById('display-room-id').textContent = roomId;
+                showScreen('waiting');
+                listenToRoom(roomId);
+            } catch (error) {
+                console.error("Create Room Error:", error);
+                showToast("Error creating room", true);
+            }
+        }
+
+        async function joinRoom(roomId) {
+            if (!userId) return;
+            roomId = roomId.toUpperCase();
+            const roomRef = getRoomRef(roomId);
+
+            try {
+                const roomSnap = await getDoc(roomRef);
+                if (!roomSnap.exists()) {
+                    showToast("Room not found!", true);
+                    return;
+                }
+
+                const data = roomSnap.data();
+                if (data.status !== 'waiting') {
+                    showToast("Room is already full or game ended.", true);
+                    return;
+                }
+                
+                if (data.player1.uid === userId) {
+                     // Rejoining own room
+                     currentRoomId = roomId;
+                     myRole = 'player1';
+                     oppRole = 'player2';
+                     listenToRoom(roomId);
+                     return;
+                }
+
+                const initialDeck = generateDeck();
+                const initialHand = initialDeck.splice(0, 5); // Draw 5
+
+                // Join as player 2
+                await updateDoc(roomRef, {
+                    status: 'playing',
+                    player2: {
+                        uid: userId,
+                        lp: 8000,
+                        deck: initialDeck,
+                        hand: initialHand,
+                        field: [null, null, null, null, null]
+                    }
+                });
+
+                currentRoomId = roomId;
+                myRole = 'player2';
+                oppRole = 'player1';
+                listenToRoom(roomId);
+
+            } catch (error) {
+                console.error("Join Room Error:", error);
+                showToast("Error joining room", true);
+            }
+        }
+
+        function listenToRoom(roomId) {
+            const roomRef = getRoomRef(roomId);
+            if (unsubscribeRoom) unsubscribeRoom();
+
+            unsubscribeRoom = onSnapshot(roomRef, (docSnap) => {
+                if (!docSnap.exists()) return;
+                
+                const data = docSnap.data();
+                gameState = data;
+                
+                if (data.status === 'playing') {
+                    showScreen('game');
+                    renderGame();
+                    checkWinCondition();
+                }
+            }, (error) => {
+                console.error("Snapshot Error:", error);
+                showToast("Lost connection to game state.", true);
+            });
+        }
+
+        // ==========================================
+        // GAMEPLAY MECHANICS & STATE MUTATORS
+        // ==========================================
+        
+        async function syncState() {
+            if (!currentRoomId || !gameState) return;
+            try {
+                await setDoc(getRoomRef(currentRoomId), gameState);
+            } catch (e) {
+                console.error("Failed to sync state:", e);
+                showToast("Network error synchronizing move.", true);
+            }
+        }
+
+        function isMyTurn() {
+            return gameState && gameState.turn === myRole;
+        }
+
+        async function passTurn() {
+            if (!isMyTurn()) return;
+            
+            // Switch turns
+            gameState.turn = oppRole;
+            gameState.phase = 'draw';
+            
+            // Auto Draw Phase for opponent
+            const nextPlayerState = gameState[oppRole];
+            if (nextPlayerState.deck.length > 0) {
+                const drawnCard = nextPlayerState.deck.pop();
+                nextPlayerState.hand.push(drawnCard);
+            } else {
+                // Deck out win condition could be here, ignoring for simplicity
+            }
+
+            // Reset 'hasAttacked' status for next player's monsters
+            nextPlayerState.field.forEach(card => {
+                if (card) card.hasAttacked = false;
+            });
+
+            // Immediately switch them to Main phase after drawing
+            gameState.phase = 'main';
+            
+            selectedAttackerIndex = null;
+            await syncState();
+            showToast("Turn Passed");
+        }
+
+        async function setPhase(newPhase) {
+            if (!isMyTurn()) return;
+            gameState.phase = newPhase;
+            selectedAttackerIndex = null; // Clear selection on phase change
+            await syncState();
+        }
+
+        async function playCardFromHand(handIndex, targetZoneIndex) {
+            if (!isMyTurn() || gameState.phase !== 'main') {
+                showToast("Can only play cards during your Main Phase.");
+                return;
+            }
+
+            const myState = gameState[myRole];
+            if (myState.field[targetZoneIndex] !== null) {
+                showToast("Zone is occupied!");
+                return;
+            }
+
+            // Move card
+            const card = myState.hand.splice(handIndex, 1)[0];
+            card.hasAttacked = true; // Sickness: Can't attack the turn it's summoned
+            myState.field[targetZoneIndex] = card;
+
+            await syncState();
+        }
+
+        async function handleAttack(attackerIndex, targetType, targetIndex = null) {
+            if (!isMyTurn() || gameState.phase !== 'battle') return;
+            
+            const myState = gameState[myRole];
+            const oppState = gameState[oppRole];
+            const attacker = myState.field[attackerIndex];
+
+            if (!attacker || attacker.hasAttacked) {
+                showToast("This monster cannot attack.");
+                return;
+            }
+
+            // Check if opponent has monsters for direct attack validation
+            const oppHasMonsters = oppState.field.some(card => card !== null);
+            
+            if (targetType === 'direct') {
+                if (oppHasMonsters) {
+                    showToast("Must attack opponent's monsters first!");
+                    return;
+                }
+                // Direct Attack
+                oppState.lp = Math.max(0, oppState.lp - attacker.atk);
+                attacker.hasAttacked = true;
+                showToast(`Direct attack! ${attacker.atk} damage!`);
+            } 
+            else if (targetType === 'monster') {
+                const defender = oppState.field[targetIndex];
+                if (!defender) return;
+
+                attacker.hasAttacked = true;
+
+                // Damage Calculation
+                if (attacker.atk > defender.atk) {
+                    // Destroy defender, damage opponent
+                    const damage = attacker.atk - defender.atk;
+                    oppState.lp = Math.max(0, oppState.lp - damage);
+                    oppState.field[targetIndex] = null;
+                    showToast(`Opponent's monster destroyed! ${damage} damage!`);
+                } else if (attacker.atk === defender.atk) {
+                    // Both destroyed
+                    myState.field[attackerIndex] = null;
+                    oppState.field[targetIndex] = null;
+                    showToast("Both monsters destroyed in battle!");
+                } else {
+                    // Attacker destroyed, damage me
+                    const damage = defender.atk - attacker.atk;
+                    myState.lp = Math.max(0, myState.lp - damage);
+                    myState.field[attackerIndex] = null;
+                    showToast(`Your monster was weaker and destroyed! You take ${damage} damage!`);
+                }
+            }
+
+            selectedAttackerIndex = null;
+            await syncState();
+        }
+
+        function checkWinCondition() {
+            if (gameState.winner) {
+                displayGameOver(gameState.winner === myRole);
+                return;
+            }
+
+            let winnerFound = null;
+            if (gameState.player1.lp <= 0) winnerFound = 'player2';
+            else if (gameState.player2.lp <= 0) winnerFound = 'player1';
+
+            if (winnerFound) {
+                gameState.winner = winnerFound;
+                syncState(); // Whoever detects it syncs it once
+            }
+        }
+
+        // ==========================================
+        // RENDER LOGIC
+        // ==========================================
+        function createCardElement(card, index, isHand, isOpponent) {
+            const div = document.createElement('div');
+            
+            if (isOpponent && isHand) {
+                div.className = 'card card-back';
+                return div;
+            }
+
+            div.className = `card ${card.hasAttacked && !isHand && !isOpponent ? 'exhausted' : ''}`;
+            
+            // Name
+            const nameEl = document.createElement('div');
+            nameEl.className = 'card-name';
+            nameEl.textContent = card.name;
+            nameEl.title = card.name;
+            
+            // Stats
+            const statsEl = document.createElement('div');
+            statsEl.className = 'card-stats';
+            const atkEl = document.createElement('span');
+            atkEl.className = 'atk-text';
+            atkEl.textContent = `ATK ${card.atk}`;
+            statsEl.appendChild(atkEl);
+
+            div.appendChild(nameEl);
+            div.appendChild(statsEl);
+
+            return div;
+        }
+
+        function renderGame() {
+            if (!gameState) return;
+
+            const myState = gameState[myRole];
+            const oppState = gameState[oppRole];
+
+            // Render LP & Info
+            document.getElementById('player-lp').textContent = myState.lp;
+            document.getElementById('opp-lp').textContent = oppState.lp;
+            document.getElementById('player-deck-count').textContent = `Deck: ${myState.deck.length}`;
+
+            // Render UI Phases & Turn Info
+            const turnIndicator = document.getElementById('turn-indicator');
+            const btnNext = document.getElementById('btn-next-phase');
+            const phaseMain = document.getElementById('phase-main');
+            const phaseBattle = document.getElementById('phase-battle');
+
+            if (isMyTurn()) {
+                turnIndicator.textContent = "Your Turn";
+                turnIndicator.className = "font-bold uppercase tracking-widest text-sm text-green-400";
+                btnNext.disabled = false;
+                
+                if (gameState.phase === 'main') {
+                    btnNext.textContent = "Enter Battle Phase";
+                    phaseMain.className = "px-4 py-1 text-xs font-bold rounded bg-blue-600 text-white shadow";
+                    phaseBattle.className = "px-4 py-1 text-xs font-bold rounded text-slate-400";
+                } else if (gameState.phase === 'battle') {
+                    btnNext.textContent = "End Turn";
+                    phaseMain.className = "px-4 py-1 text-xs font-bold rounded text-slate-400";
+                    phaseBattle.className = "px-4 py-1 text-xs font-bold rounded bg-red-600 text-white shadow";
+                }
+            } else {
+                turnIndicator.textContent = "Opponent's Turn";
+                turnIndicator.className = "font-bold uppercase tracking-widest text-sm text-red-400 animate-pulse";
+                btnNext.disabled = true;
+                btnNext.textContent = "Waiting...";
+                
+                // Show opponent phase visually
+                 if (gameState.phase === 'main') {
+                    phaseMain.className = "px-4 py-1 text-xs font-bold rounded bg-slate-700 text-slate-300";
+                    phaseBattle.className = "px-4 py-1 text-xs font-bold rounded text-slate-600";
+                } else {
+                    phaseMain.className = "px-4 py-1 text-xs font-bold rounded text-slate-600";
+                    phaseBattle.className = "px-4 py-1 text-xs font-bold rounded bg-slate-700 text-slate-300";
+                }
+            }
+
+            // Render Player Hand
+            const playerHandContainer = document.getElementById('player-hand');
+            playerHandContainer.innerHTML = '';
+            myState.hand.forEach((card, i) => {
+                const cardEl = createCardElement(card, i, true, false);
+                // Interaction: Play card in main phase
+                cardEl.onclick = () => {
+                    if (!isMyTurn() || gameState.phase !== 'main') return;
+                    // Find first empty zone
+                    const emptyIndex = myState.field.findIndex(c => c === null);
+                    if (emptyIndex !== -1) {
+                        playCardFromHand(i, emptyIndex);
+                    } else {
+                        showToast("No empty monster zones!");
+                    }
+                };
+                playerHandContainer.appendChild(cardEl);
+            });
+
+            // Render Player Field
+            const playerFieldContainer = document.getElementById('player-field');
+            playerFieldContainer.innerHTML = '';
+            for(let i=0; i<5; i++) {
+                const zone = document.createElement('div');
+                zone.className = 'zone relative';
+                const cardData = myState.field[i];
+                
+                if (cardData) {
+                    const cardEl = createCardElement(cardData, i, false, false);
+                    
+                    // Highlight selected attacker
+                    if (selectedAttackerIndex === i) {
+                        cardEl.classList.add('selected');
+                    }
+
+                    // Interaction: Select attacker
+                    cardEl.onclick = () => {
+                        if (!isMyTurn() || gameState.phase !== 'battle') return;
+                        if (cardData.hasAttacked) {
+                            showToast("Monster already attacked.");
+                            return;
+                        }
+                        selectedAttackerIndex = i;
+                        renderGame(); // re-render to show selection styling
+                        showToast("Attacker selected. Click target!");
+                    };
+                    zone.appendChild(cardEl);
+                }
+                playerFieldContainer.appendChild(zone);
+            }
+
+            // Render Opponent Hand (Backs)
+            const oppHandContainer = document.getElementById('opp-hand');
+            oppHandContainer.innerHTML = '';
+            oppState.hand.forEach(() => {
+                oppHandContainer.appendChild(createCardElement(null, 0, true, true));
+            });
+
+            // Render Opponent Field
+            const oppFieldContainer = document.getElementById('opp-field');
+            oppFieldContainer.innerHTML = '';
+            
+            // Render opponent field inverted visually in CSS, but logically 0 to 4 maps left to right for them, which means right to left for us visually. 
+            // We just render 0 to 4, flex-row handles layout.
+            for(let i=0; i<5; i++) {
+                const zone = document.createElement('div');
+                zone.className = 'zone relative';
+                
+                // Highlight opponent zones if we have an attacker selected
+                if (selectedAttackerIndex !== null && isMyTurn() && gameState.phase === 'battle') {
+                     // If they have monsters, highlight them. If not, don't highlight zone.
+                     if (oppState.field[i]) zone.classList.add('highlight');
+                }
+
+                const cardData = oppState.field[i];
+                if (cardData) {
+                    const cardEl = createCardElement(cardData, i, false, true); // Visual inversion handled by CSS rotation
+                    
+                    // Interaction: Attack this target
+                    cardEl.onclick = () => {
+                        if (selectedAttackerIndex !== null) {
+                            handleAttack(selectedAttackerIndex, 'monster', i);
+                        }
+                    };
+                    zone.appendChild(cardEl);
+                }
+                oppFieldContainer.appendChild(zone);
+            }
+
+            // Opponent Direct Attack Zone (Clicking their Profile/LP area)
+            const oppProfileArea = document.getElementById('opp-name').parentElement.parentElement;
+            oppProfileArea.onclick = () => {
+                if (selectedAttackerIndex !== null) {
+                    handleAttack(selectedAttackerIndex, 'direct');
+                }
+            };
+            
+            // Visual cue for direct attack
+            const oppHasMonsters = oppState.field.some(c => c !== null);
+            if (selectedAttackerIndex !== null && !oppHasMonsters) {
+                oppProfileArea.classList.add('ring-4', 'ring-yellow-400', 'animate-pulse');
+                oppProfileArea.style.cursor = 'pointer';
+            } else {
+                oppProfileArea.classList.remove('ring-4', 'ring-yellow-400', 'animate-pulse');
+                oppProfileArea.style.cursor = 'default';
+            }
+        }
+
+        function displayGameOver(isWin) {
+            showScreen('gameover');
+            const title = document.getElementById('gameover-title');
+            const sub = document.getElementById('gameover-subtitle');
+            
+            if (isWin) {
+                title.textContent = "YOU WIN!";
+                title.className = "text-6xl font-bold mb-4 text-green-400";
+                sub.textContent = "The opponent's Life Points reached 0.";
+            } else {
+                title.textContent = "YOU LOSE!";
+                title.className = "text-6xl font-bold mb-4 text-red-500";
+                sub.textContent = "Your Life Points reached 0.";
+            }
+        }
+
+        // ==========================================
+        // EVENTS
+        // ==========================================
+        function setupEventListeners() {
+            document.getElementById('btn-create-room').addEventListener('click', createRoom);
+            
+            document.getElementById('btn-join-room').addEventListener('click', () => {
+                const input = document.getElementById('input-room-id').value;
+                if (input.length === 4) {
+                    joinRoom(input);
+                } else {
+                    showToast("Please enter a 4-digit Room ID", true);
+                }
+            });
+
+            document.getElementById('btn-next-phase').addEventListener('click', () => {
+                if (!isMyTurn()) return;
+                
+                if (gameState.phase === 'main') {
+                    setPhase('battle');
+                } else if (gameState.phase === 'battle') {
+                    passTurn();
+                }
+            });
+        }
+
+        // Boot
+        window.addEventListener('DOMContentLoaded', init);
+
+    </script>
+</body>
+</html>
